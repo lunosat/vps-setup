@@ -1,52 +1,72 @@
 #!/bin/bash
 
 echo -e "\e[1;36m
-  ____      _ _      _____      _ _           _   
- / ___|__ _| (_)_ __| ____|_  _| (_)_ __   __| |  
-| |   / _\` | | | '__|  _| \ \/ / | | '_ \ / _\` |  
-| |__| (_| | | | |  | |___ >  <| | | | | | (_| |_ 
- \____\__,_|_|_|_|  |_____/_/\_\_|_|_| |_|\__,_(_)
+   _____          _    _____            
+  / ____|        | |  / ____|           
+ | |     ___ _ __| |_| |  __  ___ _ __  
+ | |    / _ \ '__| __| | |_ |/ _ \ '_ \ 
+ | |___|  __/ |  | |_| |__| |  __/ | | |
+  \_____\___|_|   \__|\_____|\___|_| |_|
+                                        
+                                        
            \e[1;35mSSL Setup Script by Lunosat\e[0m
 "
 
-# Solicita domínio
-read -p $'\e[1;34mEnter your domain (e.g. api.example.com): \e[0m' DOMAIN
-if [ -z "$DOMAIN" ]; then
-    echo -e "\e[1;31mError: Domain cannot be empty.\e[0m"
+echo -e "\n\e[1;33mChoose an option:\e[0m"
+echo "1) Generate new certificate"
+echo "2) Renew all certificates manually"
+
+read -p $'\e[1;34mOption [1-2]: \e[0m' OPTION
+case "$OPTION" in
+  1)
+    read -p $'\e[1;34mDomain (e.g. api.example.com): \e[0m' DOMAIN
+    [ -z "$DOMAIN" ] && { echo -e "\e[1;31mError: domain cannot be empty.\e[0m"; exit 1; }
+
+    read -p $'\e[1;34mEmail (required for Let\'s Encrypt): \e[0m' EMAIL
+    [ -z "$EMAIL" ] && { echo -e "\e[1;31mError: email cannot be empty.\e[0m"; exit 1; }
+
+    echo -e "\n\e[1;34mInstalling Certbot...\e[0m"
+    sudo apt-get update -y
+    sudo apt-get install -y software-properties-common
+    sudo add-apt-repository universe -y
+    sudo add-apt-repository ppa:certbot/certbot -y
+    sudo apt-get update -y
+    sudo apt-get install -y certbot
+
+    echo -e "\n\e[1;34mRequesting certificate for $DOMAIN...\e[0m"
+    sudo certbot certonly --standalone -d "$DOMAIN" --agree-tos -m "$EMAIL" --non-interactive
+
+    if [ $? -eq 0 ]; then
+      echo -e "\n\e[1;32m✅ Certificate successfully generated for $DOMAIN!\e[0m"
+      echo -e "\n\e[1;33mUse in Node.js like this:\e[0m"
+      echo -e "const fs = require('fs');\n\nconst SSL_OPTIONS = {\n  key: fs.readFileSync('/etc/letsencrypt/live/$DOMAIN/privkey.pem'),\n  cert: fs.readFileSync('/etc/letsencrypt/live/$DOMAIN/fullchain.pem')\n};"
+
+      read -p $'\n\e[1;34mSet up automatic renewal? [y/N]: \e[0m' RENEW
+      if [[ "$RENEW" =~ ^[Yy]$ ]]; then
+        CRON_JOB="0 0,12 * * * certbot renew --standalone --quiet"
+        sudo crontab -l 2>/dev/null | grep -Fq "$CRON_JOB"
+        if [ $? -eq 0 ]; then
+          echo -e "\n\e[1;33m⏱️  Automatic renewal already configured:\e[0m $CRON_JOB"
+        else
+          ( sudo crontab -l 2>/dev/null; echo "$CRON_JOB" ) | sudo crontab -
+          echo -e "\n\e[1;32m✅ Automatic renewal configured:\e[0m $CRON_JOB"
+        fi
+      fi
+    else
+      echo -e "\e[1;31m❌ Certificate generation failed.\e[0m"
+    fi
+    ;;
+  2)
+    echo -e "\n\e[1;34mRenewing all certificates...\e[0m"
+    sudo certbot renew --standalone --quiet
+    if [ $? -eq 0 ]; then
+      echo -e "\n\e[1;32m✅ Renewal completed successfully!\e[0m"
+    else
+      echo -e "\e[1;31m❌ Renewal failed.\e[0m"
+    fi
+    ;;
+  *)
+    echo -e "\e[1;31mInvalid option.\e[0m"
     exit 1
-fi
-
-# Solicita e-mail
-read -p $'\e[1;34mEnter your email (required for Let\'s Encrypt): \e[0m' EMAIL
-if [ -z "$EMAIL" ]; then
-    echo -e "\e[1;31mError: Email cannot be empty.\e[0m"
-    exit 1
-fi
-
-echo -e "\n\e[1;34mInstalling Certbot...\e[0m"
-sudo apt-get update -y
-sudo apt-get install -y software-properties-common
-sudo add-apt-repository universe -y
-sudo add-apt-repository ppa:certbot/certbot -y
-sudo apt-get update -y
-sudo apt-get install -y certbot
-
-# Gera certificado com Certbot standalone
-echo -e "\n\e[1;34mRequesting SSL certificate for $DOMAIN...\e[0m"
-sudo certbot certonly --standalone -d $DOMAIN --agree-tos -m $EMAIL --non-interactive
-
-# Verifica sucesso
-if [ $? -eq 0 ]; then
-    echo -e "\n\e[1;32m✅ SSL certificate successfully generated for $DOMAIN!\e[0m"
-    echo -e "\n\e[1;33mYou can use it in Node.js like this:\e[0m"
-    echo -e "\n\`\`\`js
-const fs = require('fs');
-
-const SSL_OPTIONS = {
-    key: fs.readFileSync(\"/etc/letsencrypt/live/$DOMAIN/privkey.pem\"),
-    cert: fs.readFileSync(\"/etc/letsencrypt/live/$DOMAIN/fullchain.pem\")
-};
-\`\`\`"
-else
-    echo -e "\e[1;31m❌ Failed to generate SSL certificate. Please check the output above.\e[0m"
-fi
+    ;;
+esac
